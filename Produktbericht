@@ -1,0 +1,101 @@
+/*Zweck:
+
+-->Dieser Bericht fasst wichtige Produktkennzahlen und Produktverhalten zusammen.
+
+Hervorhebungen:
+**Erfasst wesentliche Felder wie Produktname, Kategorie, Unterkategorie und Kosten.**
+**Segmentiert Produkte nach Umsatz, um High‑Performer, Mid‑Range‑Produkte oder Low‑Performer zu identifizieren.**
+
+Aggregiert produktbezogene Kennzahlen:
+Gesamtanzahl der Bestellungen
+Gesamtumsatz
+Insgesamt verkaufte Menge
+Gesamtanzahl eindeutiger Kunden
+Lebensdauer (in Monaten)
+
+Berechnet wertvolle KPIs:
+
+Aktualität (Monate seit der letzten Bestellung)
+Durchschnittlicher Bestellumsatz (AOR)
+Durchschnittlicher monatlicher Umsatz*/
+
+/***Erfasst wesentliche Felder wie Produktname, Kategorie, Unterkategorie und Kosten.**/
+CREATE VIEW [gold.report_products] as
+WITH base_abfrag as (
+select
+s.order_number,
+s.order_date,
+s.customer_key,
+s.sales_amount,
+s.quantity,
+p.product_name,
+p.product_key,
+p.category,
+p.subcategory,
+p.cost
+
+from [gold.dim_products] p
+left join [gold.fact_sales] s
+on p.product_key = s.product_key
+where s.order_date is not null )
+
+,product_aggregations AS (
+/*---------------------------------------------------------------------------
+2) Product Aggregations: Aggregiert produktbezogene Kennzahlen:
+---------------------------------------------------------------------------*/
+SELECT
+    product_key,
+    product_name,
+    category,
+    subcategory,
+    cost,
+    DATEDIFF(MONTH, MIN(order_date), MAX(order_date)) AS lebensdauer,
+    MAX(order_date) AS last_sale_date,
+    COUNT(DISTINCT order_number) AS total_besetllungen,
+	COUNT(DISTINCT customer_key) AS total_customers,
+    SUM(sales_amount) AS Gesamtumsatz,
+    SUM(quantity) AS verkaufte_menge,
+	ROUND(AVG(CAST(sales_amount AS FLOAT) / NULLIF(quantity, 0)),1) AS avg_selling_price
+FROM base_abfrag
+
+GROUP BY
+    product_key,
+    product_name,
+    category,
+    subcategory,
+    cost
+)
+
+select 
+	product_key,
+	product_name,
+	category,
+	subcategory,
+	cost,
+	last_sale_date,
+	DATEDIFF(MONTH, last_sale_date, GETDATE()) AS recency_in_months,
+	CASE
+		WHEN Gesamtumsatz > 50000 THEN 'High-Performer'
+		WHEN Gesamtumsatz >= 10000 THEN 'Mid-Range'
+		ELSE 'Low-Performer'
+	END AS product_segment,
+	lebensdauer,
+	total_besetllungen,
+	Gesamtumsatz,
+	verkaufte_menge,
+	total_customers,
+	avg_selling_price,
+	-- Average Order Revenue (AOR)
+	CASE 
+		WHEN total_besetllungen = 0 THEN 0
+		ELSE Gesamtumsatz / total_besetllungen
+	END AS avg_order_revenue,
+
+	-- Average Monthly Revenue
+	CASE
+		WHEN lebensdauer = 0 THEN total_besetllungen
+		ELSE Gesamtumsatz / lebensdauer
+	END AS avg_monthly_revenue
+
+from product_aggregations
+
